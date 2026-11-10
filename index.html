@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Fail closed: no network access of any kind from this page. Everything runs locally. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>5:00 · Kerberos has a five-minute wall</title>
+<meta name="description" content="Kerberos rejects requests when two clocks disagree by more than five minutes, even with a valid ticket. Break the clocks yourself and see which machine to fix.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23090d10'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2336d1e6' stroke-width='2.5'/%3E%3Cpath d='M16 10v6l4 2' fill='none' stroke='%2336d1e6' stroke-width='2.5' stroke-linecap='round'/%3E%3Crect x='27' y='5' width='2.5' height='22' fill='%23ff5d73'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="boot.js"></script>
+</head>
+<body>
+<div id="progress" aria-hidden="true"></div>
+
+<!-- ───────────── hero ───────────── -->
+<header class="hero wrap">
+  <div class="hero-copy">
+    <p class="eyebrow">a kerberos failure, explained by breaking it</p>
+    <h1>Kerberos has a <span class="num">five-minute</span> <span class="wallword">wall<span class="wallbar" aria-hidden="true"></span></span></h1>
+    <p class="lede">Make two machines disagree about the time by more than five minutes and Kerberos refuses to talk to you: right password, valid ticket, correct service name, denied anyway.</p>
+    <p class="lede">No complaint about passwords. Just: <code>Clock skew too great</code>.</p>
+    <p class="aside">it's usually the clock. (usually.)</p>
+  </div>
+
+  <div class="clockcard" role="img" aria-label="Two analog clocks, labelled client and service. The client clock slowly drifts ahead of the service clock. When the difference passes five minutes the status turns red and shows a clock skew error.">
+    <div class="clocks" id="hero-clocks" aria-hidden="true"></div>
+    <div class="delta" aria-hidden="true">
+      <span class="delta-k">client − service</span>
+      <b id="hero-delta">+0:00</b>
+    </div>
+    <div id="hero-status" class="status ok" aria-hidden="true">✓ within ±5:00 · accepted</div>
+  </div>
+  <p class="sr-only">An animation of a client clock drifting away from a service clock until Kerberos rejects the request with error 37, clock skew too great.</p>
+  <a class="scroll-cue" href="#try" aria-label="Scroll to the simulator">↓</a>
+</header>
+
+<main>
+
+<!-- ───────────── 01 simulator ───────────── -->
+<section id="try" class="wrap chapter reveal">
+  <p class="eyebrow">01 · break the clocks</p>
+  <h2>whose clock is wrong?</h2>
+  <p class="lead">A Kerberos login is really two checks. First your client gets tickets from the <b>KDC</b> (<code>kinit</code>). Then it shows a ticket to the <b>service</b>. Each check compares your client's timestamp with that machine's clock. The KDC's clock is the reference; drag the other two and watch which stage fails.</p>
+
+  <div class="controls">
+    <div class="chips" role="group" aria-label="Example scenarios">
+      <button type="button" class="chip" data-preset="sync">all in sync</button>
+      <button type="button" class="chip" data-preset="laptop">laptop woke from sleep</button>
+      <button type="button" class="chip" data-preset="vm">service VM restored from snapshot</button>
+      <button type="button" class="chip" data-preset="agree">client + service agree, KDC doesn't</button>
+      <button type="button" class="chip" data-preset="inside">just inside (4:59)</button>
+      <button type="button" class="chip" data-preset="outside">just outside (5:01)</button>
+    </div>
+    <div class="seg" role="group" aria-label="Maximum allowed skew">
+      <span class="seg-k">allowed skew</span>
+      <button type="button" class="seg-btn" data-limit="120" aria-pressed="false">2:00</button>
+      <button type="button" class="seg-btn" data-limit="300" aria-pressed="true">5:00</button>
+      <button type="button" class="seg-btn" data-limit="600" aria-pressed="false">10:00</button>
+    </div>
+  </div>
+
+  <div class="sliders">
+    <div class="slider">
+      <label for="r-client" class="sliderlabel">client clock: <b id="v-client">in sync</b></label>
+      <input id="r-client" type="range" min="-600" max="600" step="1" value="0">
+    </div>
+    <div class="slider">
+      <label for="r-service" class="sliderlabel">service clock: <b id="v-service">in sync</b></label>
+      <input id="r-service" type="range" min="-600" max="600" step="1" value="0">
+    </div>
+    <div class="slider static">
+      <span class="sliderlabel">KDC clock: <b>the reference</b></span>
+      <span class="fine inline">tickets are stamped with the KDC's time</span>
+    </div>
+  </div>
+
+  <div class="stages">
+    <article class="stage" id="stage1">
+      <header>
+        <h3><span class="stage-n">1</span> get tickets</h3>
+        <p class="stage-sub">client ↔ KDC · <code>kinit</code>, then ticket requests</p>
+      </header>
+      <div id="tl1" class="tl"></div>
+      <p id="st1" class="stage-status"></p>
+      <p id="msg1" class="stage-msg"></p>
+    </article>
+    <article class="stage" id="stage2">
+      <header>
+        <h3><span class="stage-n">2</span> use the ticket</h3>
+        <p class="stage-sub">client ↔ service · the actual connection</p>
+      </header>
+      <div id="tl2" class="tl"></div>
+      <p id="st2" class="stage-status"></p>
+      <p id="msg2" class="stage-msg"></p>
+    </article>
+  </div>
+
+  <div id="verdict" class="verdict" role="status" aria-live="polite">
+    <strong id="verdict-title">…</strong>
+    <span id="verdict-text"></span>
+  </div>
+  <p class="fine">Positive means that clock is ahead. The skew check is "more than the allowed amount", so a difference of exactly 5:00 still passes. Real clocks drift continuously; here you're freezing one moment. Error 37 is <code>KRB_AP_ERR_SKEW</code>; "typical message" lines are what MIT <code>kinit</code> and Java's GSS-API print.</p>
+</section>
+
+<!-- ───────────── 02 replay ───────────── -->
+<section id="why" class="wrap chapter reveal">
+  <p class="eyebrow">02 · why five minutes</p>
+  <h2>the wall is a memory limit</h2>
+  <p class="lead">Every request carries an <b>authenticator</b>: a timestamp encrypted with the session key. If an attacker captured one, they could send it again. So services do two things: reject timestamps outside the window, and remember the authenticators they've already seen <em>inside</em> it. The window is how long they have to remember.</p>
+
+  <div class="panel">
+    <div class="controls tight">
+      <div class="seg" role="group" aria-label="Replay cache" id="rp-seg">
+        <span class="seg-k">service replay cache</span>
+        <button type="button" class="seg-btn" data-cache="on" aria-pressed="true">on</button>
+        <button type="button" class="seg-btn" data-cache="off" aria-pressed="false">off</button>
+      </div>
+    </div>
+    <div class="slider wide">
+      <label for="rp-range" class="sliderlabel">attacker replays the captured authenticator after: <b id="rp-val">0:30</b></label>
+      <input id="rp-range" type="range" min="0" max="900" step="1" value="30">
+    </div>
+    <div id="tl3" class="tl"></div>
+    <div id="rp-out" class="outcome">
+      <strong id="rp-title"></strong>
+      <span id="rp-text"></span>
+    </div>
+  </div>
+  <p class="fine">The trade: a wider window means services remember more for longer, and a replay has more time to work if that memory is missing. That's why the fix for a clock problem is never "raise the skew". Replay also needs an attacker who captured the request in the first place, so treat this as defense in depth rather than a headline attack.</p>
+</section>
+
+<!-- ───────────── 03 tickets ───────────── -->
+<section id="tickets" class="wrap chapter reveal">
+  <p class="eyebrow">03 · tickets have clocks too</p>
+  <h2>a slow clock sees the future</h2>
+  <p class="lead">Tickets carry their own start and end times, stamped by the KDC. The service compares them with its own clock, with the same allowance. A service whose clock is slow sees a fresh ticket as not valid <em>yet</em>. One whose clock is fast sees an almost-expired ticket as already dead.</p>
+
+  <div class="panel">
+    <div class="controls tight">
+      <div class="seg" role="group" aria-label="Ticket scenario" id="tk-seg">
+        <span class="seg-k">scenario</span>
+        <button type="button" class="seg-btn" data-case="fresh" aria-pressed="true">fresh ticket</button>
+        <button type="button" class="seg-btn" data-case="expiring" aria-pressed="false">about to expire</button>
+      </div>
+    </div>
+    <div class="slider wide">
+      <label for="tk-range" class="sliderlabel">service clock error: <b id="tk-val">6:00 slow</b></label>
+      <input id="tk-range" type="range" min="-900" max="900" step="1" value="-360">
+    </div>
+    <div id="tl4" class="tl"></div>
+    <div id="tk-out" class="outcome">
+      <strong id="tk-title"></strong>
+      <span id="tk-text"></span>
+    </div>
+  </div>
+  <p class="fine">Scenario times: the fresh ticket is 30 seconds old and the expiring one has 2 minutes left, each measured on the true clock. Allowed skew is 5:00 here.</p>
+</section>
+
+<!-- ───────────── 04 causes ───────────── -->
+<section id="causes" class="wrap chapter reveal">
+  <p class="eyebrow">04 · the usual suspects</p>
+  <h2>how clocks go wrong</h2>
+  <ul class="cards">
+    <li><b>VM restored or resumed</b>Snapshots, live migration and suspend/resume can leave a guest minutes (or hours) behind until something steps its clock.</li>
+    <li><b>Laptop slept</b>Clients that sleep and wake on flaky networks can run on a stale clock until time sync catches up.</li>
+    <li><b>Time sync blocked or broken</b>A firewall rule, a dead NTP source or a stopped service leaves a host to drift on its own.</li>
+    <li><b>Containers inherit the host</b>A container has no clock of its own. If the host (or the VM under Docker Desktop) is off, so is everything inside.</li>
+    <li><b>"Fixing" the time zone by hand</b>Kerberos timestamps are UTC, so a different zone is harmless. Setting the local time wrong <em>to match a zone</em> is not.</li>
+    <li><b>Different time sources</b>Two hosts both "synced", but to different sources that disagree with each other and with the KDC.</li>
+  </ul>
+</section>
+
+<!-- ───────────── 05 fix ───────────── -->
+<section id="fix" class="wrap chapter reveal">
+  <p class="eyebrow">05 · find it, fix it</p>
+  <h2>read the failure, then the clocks</h2>
+  <ul class="check">
+    <li><b>Fails at <code>kinit</code>?</b>The client and the KDC disagree. Fix the client (or the KDC). The service isn't involved yet.</li>
+    <li><b><code>kinit</code> works but the connection fails?</b>The client and KDC agree, so look at the <em>service</em> host's clock, then ticket start and end times (chapter 03).</li>
+    <li><b>Tempted to raise <code>clockskew</code>?</b>Don't, except in a throwaway test config. It hides the problem and widens the replay window (chapter 02).</li>
+  </ul>
+
+  <h3>compare the clocks</h3>
+<pre class="code"><code># Linux — run on the client, the KDC and the service host, then compare
+date -u                      # UTC time right now
+timedatectl status           # is the system clock synchronized?
+chronyc tracking             # how far off is it from its time source?
+
+# Windows
+w32tm /query /status
+w32tm /stripchart /computer:dc.example.com /samples:5 /dataonly
+w32tm /resync                # after fixing the time source</code></pre>
+  <p class="fine">Prefer fixing the time source so every host follows the same one. Stepping a clock by hand (for example <code>chronyc makestep</code>) is fine as a one-off, but let time sync keep it right afterwards. Hostnames above are placeholders.</p>
+
+  <h3>what you'll see when it breaks</h3>
+<pre class="code"><code>$ kinit alice@EXAMPLE.COM
+kinit: Clock skew too great while getting initial credentials
+
+# Java / GSS-API (for example a JVM service or client)
+GSSException: Failure unspecified at GSS-API level
+  (Mechanism level: Clock skew too great (37))</code></pre>
+</section>
+
+<footer class="wrap foot">
+  <p>Sources: <a href="https://www.rfc-editor.org/rfc/rfc4120" rel="noopener noreferrer">RFC 4120 (Kerberos V5)</a> · <a href="https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html" rel="noopener noreferrer">MIT krb5.conf reference (<code>clockskew</code>, default 300 s)</a> · <a href="https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc780011(v=ws.10)" rel="noopener noreferrer">Microsoft: authentication errors from unsynchronized clocks</a></p>
+  <p>Educational simulation: real implementations differ in details (replay cache storage, error text, time-offset recovery). No trackers, no network calls, no dependencies.</p>
+</footer>
+</main>
+
+<script src="tl.js"></script>
+<script src="clocks.js"></script>
+<script src="sim.js"></script>
+<script src="extras.js"></script>
+<script src="scrolly.js"></script>
+</body>
+</html>
